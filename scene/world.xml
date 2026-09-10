@@ -1,0 +1,149 @@
+<mujoco>
+  <include file="common/cameras.xml"/>
+
+  <!--
+    UR5e base sits at world origin (see ur5e_robotiq.xml). The shared floor
+    plane (declared in scene_real.xml) doubles as the tabletop, z=0.
+
+    Manifold uses manifold.obj's own corner-origin convention, so local
+    coordinates here match the measured port positions directly.
+
+    No tray CAD was provided, so QDs simply rest upright on the shared
+    floor in a 2x2 cluster.
+  -->
+
+  <default>
+    <default class="qd">
+      <default class="qd_visual">
+        <geom type="mesh" contype="0" conaffinity="0" group="2" material="mat_qd"/>
+      </default>
+      <default class="qd_collision">
+        <geom type="cylinder" group="3"/>
+      </default>
+    </default>
+    <default class="manifold">
+      <!-- group="1", not "2" - group 2 also holds the arm/gripper, so
+           hiding it for the third-person-only color swap below would make
+           the whole robot disappear from that render too. -->
+
+      <default class="manifold_visual">
+        <geom type="mesh" contype="0" conaffinity="0" group="1" material="mat_manifold"/>
+      </default>
+      <default class="manifold_collision">
+        <geom type="box" group="3"/>
+      </default>
+    </default>
+  </default>
+
+  <asset>
+    <mesh name="qd_visual" file="QD.stl"/>
+    <mesh name="manifold_visual" file="manifold.obj"/>
+    <!-- mat_qd stays bright and near-achromatic on purpose:
+         shape_detector.py's detect_hexagons() mask (chroma<20 & gray>150)
+         is tuned to separate a near-white QD from the floor. mat_manifold
+         keeps a similar brightness to a plain gray since is_hole_occupied()'s
+         edge detection is sensitive to absolute brightness - hue can move
+         but luminance should stay in roughly this range. Matte finish
+         avoids glare hotspots that would corrupt the shape detectors. -->
+    <material name="mat_qd" rgba="0.82 0.80 0.76 1" specular="0" shininess="0" reflectance="0"/>
+    <material name="mat_manifold" rgba="0.62 0.53 0.42 1"/>
+    <!-- Third-person-camera-only manifold color (see manifold_visual_geom_pretty
+         below) - vision never renders this geom, so it's free to be
+         darker/richer without affecting detection. emission="1" keeps it a
+         flat, uniform color from every angle. -->
+    <material name="mat_manifold_pretty" rgba="0.15 0.08 0.04 1" specular="0" shininess="0" reflectance="0" emission="1"/>
+  </asset>
+
+  <worldbody>
+    <!-- Framed on the tray+manifold workspace; xyaxes is an explicit
+         look-at basis so the horizon comes out level. Checked against the
+         tallest pose the arm reaches mid-session so nothing clips frame. -->
+    <camera name="third_person_cam" class="scene_cam" pos="1.77 -0.236 0.88" xyaxes="0.161489 0.986875 -0.000000 -0.333339 0.054546 0.941228"/>
+
+    <!--
+      ==================== Manifold (static, 4 ports) ====================
+      Collision is a solid base block (z 0-24mm) plus an open top layer
+      (z 24-50mm) with one continuous gap across all 4 ports, rather than
+      separate per-port slots with dividers - the grasp's 40deg yaw means
+      the gripper pads approach each port at an angle, and a couple of
+      narrower slot attempts let the gripper clip the manifold partway
+      through descent. None of the dividers were load-bearing, so removing
+      them was simpler than chasing an exact clearance for one yaw.
+
+      Engagement depth (50mm manifold top minus where the thread tip lands)
+      is 12.0mm, from the QD mesh: the hex flange sits at 34.9mm and the
+      real thread runs from there to the 54.9mm tip.
+    -->
+    <body name="manifold" pos="0.40 0.15 0">
+      <geom name="manifold_visual_geom" class="manifold_visual" mesh="manifold_visual"/>
+      <!-- Same mesh as manifold_visual_geom above, on group="5" (hidden by
+           MuJoCo's default geomgroup, so invisible everywhere by default
+           including every vision-facing render, which always uses
+           unmodified default scene options). The third-person camera's own
+           render call flips this: shows group 5, hides group 1
+           (manifold_visual_geom, the vision-safe color) - group 1 exists
+           specifically so that swap only touches the manifold, not the
+           rest of the scene. Actually hiding one geom and showing the
+           other this way covers every viewing angle for free, unlike
+           trying to visually occlude one geom with the other (which only
+           works face-on, not from the side). -->
+      <geom name="manifold_visual_geom_pretty" type="mesh" contype="0" conaffinity="0"
+            group="5" mesh="manifold_visual" material="mat_manifold_pretty"/>
+
+      <geom name="manifold_col_base" class="manifold_collision" size="0.125 0.025 0.012" pos="0.125 0.025 0.012"/>
+      <geom name="manifold_col_top_left_end" class="manifold_collision" size="0.015 0.025 0.013" pos="0.015 0.025 0.037"/>
+      <geom name="manifold_col_top_right_end" class="manifold_collision" size="0.015 0.025 0.013" pos="0.235 0.025 0.037"/>
+
+      <site name="port_1_site" pos="0.0575 0.025 0.050" group="4" size="0.003"/>
+      <site name="port_2_site" pos="0.1025 0.025 0.050" group="4" size="0.003"/>
+      <site name="port_3_site" pos="0.1475 0.025 0.050" group="4" size="0.003"/>
+      <site name="port_4_site" pos="0.1925 0.025 0.050" group="4" size="0.003"/>
+    </body>
+
+    <!--
+      QD collision stack per QD, in the mesh's own local frame (z=0 at the
+      smooth shaft's far end, z=54.9mm at the true thread tip): the far end
+      (0-34.9mm) is the smooth shaft, unused by this task; the flange
+      (34.9-42.9mm) is the grasp point and the seating shoulder; the thread
+      (42.9-54.9mm) goes into the manifold, 12.0mm engagement depth. Each
+      QD body applies quat="0 1 0 0" (180deg about X) so the tip points
+      down; pos.z=0.0559 follows from that flip so the tip rests just above
+      the floor.
+
+      Each QD is a mocap body rather than a normal free body driven by
+      contact physics - friction/mass/inertia on a body this light, held by
+      a small pad contact patch, made for a genuinely unstable grip.
+      qd_sim/tasks/kinematic_weld.py drives its pose directly once
+      pick_sequence.py closes the gripper on it. Collision geoms stay
+      enabled anyway so the gripper still visually stops at the QD's real
+      surface while closing, before the weld takes over.
+    -->
+    <body name="qd_1" pos="0.42 -0.23 0.0559" quat="0 1 0 0" mocap="true">
+      <geom name="qd_1_visual" class="qd_visual" mesh="qd_visual"/>
+      <geom name="qd_1_col_far" class="qd_collision" size="0.00812 0.01745" pos="0 0 0.01745"/>
+      <geom name="qd_1_col_flange" class="qd_collision" size="0.0156 0.004" pos="0 0 0.0389"/>
+      <geom name="qd_1_col_thread" class="qd_collision" size="0.0106 0.006" pos="0 0 0.0489"/>
+    </body>
+
+    <body name="qd_2" pos="0.48 -0.23 0.0559" quat="0 1 0 0" mocap="true">
+      <geom name="qd_2_visual" class="qd_visual" mesh="qd_visual"/>
+      <geom name="qd_2_col_far" class="qd_collision" size="0.00812 0.01745" pos="0 0 0.01745"/>
+      <geom name="qd_2_col_flange" class="qd_collision" size="0.0156 0.004" pos="0 0 0.0389"/>
+      <geom name="qd_2_col_thread" class="qd_collision" size="0.0106 0.006" pos="0 0 0.0489"/>
+    </body>
+
+    <body name="qd_3" pos="0.42 -0.17 0.0559" quat="0 1 0 0" mocap="true">
+      <geom name="qd_3_visual" class="qd_visual" mesh="qd_visual"/>
+      <geom name="qd_3_col_far" class="qd_collision" size="0.00812 0.01745" pos="0 0 0.01745"/>
+      <geom name="qd_3_col_flange" class="qd_collision" size="0.0156 0.004" pos="0 0 0.0389"/>
+      <geom name="qd_3_col_thread" class="qd_collision" size="0.0106 0.006" pos="0 0 0.0489"/>
+    </body>
+
+    <body name="qd_4" pos="0.48 -0.17 0.0559" quat="0 1 0 0" mocap="true">
+      <geom name="qd_4_visual" class="qd_visual" mesh="qd_visual"/>
+      <geom name="qd_4_col_far" class="qd_collision" size="0.00812 0.01745" pos="0 0 0.01745"/>
+      <geom name="qd_4_col_flange" class="qd_collision" size="0.0156 0.004" pos="0 0 0.0389"/>
+      <geom name="qd_4_col_thread" class="qd_collision" size="0.0106 0.006" pos="0 0 0.0489"/>
+    </body>
+  </worldbody>
+</mujoco>

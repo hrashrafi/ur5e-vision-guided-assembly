@@ -1,0 +1,45 @@
+<mujoco model="qd_manifold_scene">
+  <include file="ur5e_robotiq.xml"/>
+  <include file="world.xml"/>
+
+  <statistic center="0.4 0 0.3" extent="1.2"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="120" elevation="-20" offwidth="1920" offheight="1440"/>
+    <quality shadowsize="4096" offsamples="8"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
+      markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <!-- reflectance=0 - with any reflectance the floor throws ghost
+         silhouettes near objects in wrist-cam renders, which corrupts the
+         shape detectors' contours close up. -->
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0"/>
+  </asset>
+
+  <worldbody>
+    <!-- castshadow="false" - with shadows on, the arm's shadow falls
+         across a nearby QD in some wrist-cam poses and breaks its
+         shape/circularity check. -->
+    <light pos="0 0 2" dir="0 0 -1" directional="true" castshadow="false"/>
+    <light pos="0.5 -0.3 1.5" dir="0 0.2 -0.8" directional="true" castshadow="false"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+  </worldbody>
+
+  <!--
+    QDs are mocap bodies (see world.xml), so they don't occupy any qpos
+    slots - MuJoCo initializes their pose from each qd_N body's pos/quat on
+    every reset. This "ready" keyframe is just the arm/gripper pose (15
+    qpos: 6 arm + 1 screw_adapter + 8 gripper), kept under this name
+    because qd_sim/sim/env.py's SimEnv looks for a keyframe called "ready".
+  -->
+  <keyframe>
+    <key name="ready"
+      qpos="-1.5708 -1.5708 1.5708 -1.5708 -1.5708 0 0 0 0 0 0 0 0 0 0"
+      ctrl="-1.5708 -1.5708 1.5708 -1.5708 -1.5708 0 0 0"/>
+  </keyframe>
+</mujoco>

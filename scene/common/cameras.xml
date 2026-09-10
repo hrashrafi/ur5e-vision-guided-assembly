@@ -1,0 +1,11 @@
+<mujoco>
+  <!-- Shared default class for fixed (non-body-mounted) scene cameras. The
+       wrist camera is body-mounted (added in build_ur5e_robotiq.py via
+       mjSpec, since it must attach to the gripper body defined there) and
+       doesn't use this class. -->
+  <default>
+    <default class="scene_cam">
+      <camera fovy="45"/>
+    </default>
+  </default>
+</mujoco>
